@@ -7,9 +7,6 @@
 #define LED 5
 #define AREAD 6
 
-// const char* ssid = "Wifi MacWifiFace";
-// const char* pwd = "UYB&2TL!";
-
 
 
 const int timout_wifi = 60;//number of retries when connecting to wifi
