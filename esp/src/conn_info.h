@@ -1,6 +1,9 @@
 #pragma once
 
 
+// #define SSID "Wifi MacWifiFace"
+// #define PWD "UYB&2TL!"
+
 #define SSID "( ͡° ͜ʖ ͡°)"
 #define PWD "your mother"
 
