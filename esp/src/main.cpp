@@ -1,7 +1,14 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <conn_info.h>
+#include <WireGuard-ESP32.h>
+#include "time.h"
 
+WiFiClient client;
+
+int receive(int buff_size, byte* data);
+bool connect_to_server();
+bool connect_to_wifi();
 
 //pin inputs and outputs
 #define PUMP 5
@@ -11,9 +18,10 @@
 const int moist_sensors[] = {18};
 const int sol_pins[] = {6};
 const int water_times[] = {10000};//10 sec
+const int water_delays[] = {48};//min num of hours between watering events
 const int num_plants = 1;
 
-plant plants[num_plants];
+
 
 //A0 - A4 is GPIO 18-14
 //A5 is GPIO 8
@@ -30,6 +38,8 @@ const int data_retry_time = 500;//timeout duration
 const int sent_packet_size = 128;
 const int recv_packet_size = 128;
 
+time_t t = 0;
+
 const int data_collect_size = 100; //how many measurements should be taken when measuring moisture
 const int dat_collect_interval = 10; //delay between individual moisture measurements
 
@@ -40,12 +50,17 @@ class plant {
   int measure_pin;
   int sol_pin;
   int water_time;
+  int water_delay;
 
+  int last_water_time = -1;
   int moist_level = -1;
 
-  //constructor
-  plant(int iplant_num, int imeasure_pin, int isol_pin, int iwater_time)
-  : plant_num(iplant_num), measure_pin(imeasure_pin), sol_pin(isol_pin), water_time(iwater_time){
+  //constructors
+  plant():
+  plant_num(-1), measure_pin(-1), sol_pin(-1), water_time(-1), water_delay(-1){};
+
+  plant(int iplant_num, int imeasure_pin, int isol_pin, int iwater_time, int iwater_delay)
+  : plant_num(iplant_num), measure_pin(imeasure_pin), sol_pin(isol_pin), water_time(iwater_time), water_delay(iwater_delay){
   }
 
   int measure(){
@@ -81,29 +96,32 @@ class plant {
     digitalWrite(PUMP,LOW);
     delay(100);
     digitalWrite(sol_pin,LOW);
+    time(&t);
+    last_water_time = t;
   }
 };
 
-WiFiClient client;
-
-int receive(int buff_size, byte* data);
-bool connect_to_server();
-bool connect_to_wifi();
-
+plant* plants[num_plants];
 
 void setup() {
   Serial.begin(115200);
 
   connect_to_wifi();
   connect_to_server();
+
+  //i could sync this up with a time server, but i don't think it matters that much
+  // tv.tv_sec = 0;
+  // tv.tv_usec = 0;
+
+
   pinMode(PUMP, OUTPUT);
   
   for(int i = 0; i< num_plants; i++){
     pinMode(sol_pins[i], OUTPUT);
     pinMode(moist_sensors[i], INPUT);
     
-    plants[i] = new plant(i, moist_sensors[i], sol_pins[i], water_times[i]);
-    plants[i].measure();
+    plants[i] = new plant(i, moist_sensors[i], sol_pins[i], water_times[i], water_delays[i]);
+    plants[i]->measure();
   }
 }
 
@@ -115,13 +133,22 @@ void loop() {
     connect_to_server();
   }
 
-
+  for(int i = 0; i< num_plants; i++){
+    //nominal dry measurement ~ 3300
+    // wet measurement ~1000
+    plants[i]->measure();
+    // if(plants[i].last_water_time + plants[i].water_delay < ){
+      
+    // }
+    time(&t);
+    Serial.println(t);
+  }
 
   if(client.connected()){
     client.print("sup");
 
-
     byte recv[recv_packet_size];
+    byte n = 0;
     for(int i = 0; i < recv_packet_size; i++){//remember to initialize your arrays kids
       recv[i] = 0;
     }
@@ -130,7 +157,6 @@ void loop() {
     }
     else{//responding to reception
       char type = (char)recv[0];
-      Serial.printf("recieved type: %c\n", type);
       switch (type)
       {
         case 'L'://L for log
@@ -145,14 +171,14 @@ void loop() {
         case 'W'://W for water (set water level)
           break;
         case 'M'://M for measure
-          byte plant = recv[1];
-          if(plant > num_plants){
+          n = recv[1];
+          if(n > num_plants){
             client.print("Lrequested plant exceeds num of plants");
           }
           else{
-            Serial.printf("plant %n requested, last moist level: %n", plant, plants[plant].moist_level);
+            Serial.printf("plant %n requested, last moist level: %n", n, plants[n]->moist_level);
             client.print("N");
-            client.print(plants[plant].moist_level);
+            client.print(plants[n]->moist_level);
           }
           break;
         default:
@@ -161,13 +187,6 @@ void loop() {
       }
       
     }
-  }
-
-
-  for(int i = 0; i< num_plants; i++){
-    //nominal dry measurement ~ 3300
-    // wet measurement ~1000
-    plants[i].measure();
   }
   delay(1000);
 }
